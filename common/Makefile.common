@@ -1,0 +1,79 @@
+# ARM Privilege Test Framework - Common Build Rules
+#
+# Each extension Makefile defines:
+#   TARGET     = <name>.elf
+#   EXT_OBJS   = list of extension .o files
+# Then includes this file.
+
+COMMON_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+ROOT_DIR   := $(COMMON_DIR)/..
+
+# Platform selection (default: qemu_virt)
+PLATFORM ?= qemu_virt
+PLATFORM_DIR = $(COMMON_DIR)/platform/$(PLATFORM)
+
+# Include platform build config
+-include $(PLATFORM_DIR)/platform.mk
+
+# Toolchain
+CC      = $(CROSS_COMPILER)gcc
+AS      = $(CROSS_COMPILER)gcc
+LD      = $(CROSS_COMPILER)ld
+OBJCOPY = $(CROSS_COMPILER)objcopy
+OBJDUMP = $(CROSS_COMPILER)objdump
+SIZE    = $(CROSS_COMPILER)size
+
+# Compiler flags
+CFLAGS  = -Wall -Wextra -Werror -O2 -g \
+          -ffreestanding -nostdlib -nostartfiles \
+          -march=armv8-a -mgeneral-regs-only \
+          -I$(COMMON_DIR) \
+          -include $(PLATFORM_DIR)/platform.h \
+          -include $(PLATFORM_DIR)/platform_model.h
+
+ASFLAGS = -g -march=armv8-a \
+          -I$(COMMON_DIR) \
+          -include $(PLATFORM_DIR)/platform.h
+
+LDFLAGS = -nostdlib -static
+
+# Common objects
+COMMON_OBJS = \
+    $(COMMON_DIR)/entry.o \
+    $(COMMON_DIR)/trap_asm.o \
+    $(COMMON_DIR)/trap.o \
+    $(COMMON_DIR)/privilege.o \
+    $(COMMON_DIR)/uart.o \
+    $(COMMON_DIR)/test_framework.o
+
+# All objects
+ALL_OBJS = $(COMMON_OBJS) $(EXT_OBJS)
+
+# Default target
+all: $(TARGET)
+
+$(TARGET): $(ALL_OBJS) kernel.ld
+	$(LD) $(LDFLAGS) -T kernel.ld -o $@ $(ALL_OBJS)
+	$(SIZE) $@
+
+# Compile rules
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.o: %.S
+	$(AS) $(ASFLAGS) -c -o $@ $<
+
+# QEMU run target
+qemu: $(TARGET)
+	$(QEMU) $(QEMU_OPTS) $(TARGET)
+
+# Disassemble
+disasm: $(TARGET)
+	$(OBJDUMP) -d $@ | cat
+
+# Clean
+clean:
+	rm -f $(ALL_OBJS) $(TARGET) *.bin
+	rm -f $(COMMON_DIR)/*.o
+
+.PHONY: all clean qemu disasm
