@@ -172,43 +172,99 @@ get_current_el();            // 读取当前 EL (0-3)
 
 ## 四、实战：添加 ECC 扩展测试
 
-假设要新增 ARM 架构下 ECC（Error Correcting Code）相关测试，验证 RAS（Reliability, Availability, Serviceability）扩展中 ECC 相关系统寄存器的访问权限。
+### 4.1 什么是 ECC 测试
 
-### 第一步：创建目录结构
+ECC（Error Correcting Code，纠错码）是一种检测和纠正内存/存储数据错误的硬件机制。ECC 测试的核心不是验证"系统寄存器权限"，而是验证 **内存纠错功能本身是否正确工作**：
+
+| 错误类型 | 缩写 | 预期行为 |
+|---------|------|---------|
+| **1bit 错误** | CE（Correctable Error） | 数据被硬件自动纠正，读值正确，CE 状态被记录 |
+| **2bit 错误** | UE（Uncorrectable Error） | 数据不可纠正，触发异常/中断，UE 状态被记录 |
+
+ECC 测试的通用 6 步流程：
+
+```
+初始化环境 → 写入已知数据 → 处理 cache 一致性
+    → 配置硬件错误注入 → 触发读访问 → 检查 CE/UE 状态、数据、异常
+```
+
+> **关键前提**：ECC 测试**必须有硬件支持的错误注入机制**（ECC inject control register）。
+> 不同平台（DDR 控制器 / 片上 SRAM / L2 Cache）的注入寄存器地址和位域各不相同，
+> 需要参考具体 SoC 的 TRM（Technical Reference Manual）。
+
+### 4.2 ECC 测试与现有框架的关系
+
+现有框架（`EXPECT_TRAP`/`EXPECT_NO_TRAP`）专注于 **特权指令 trap 验证**。ECC 测试的需求不同：
+
+| 维度 | 特权指令测试 | ECC 测试 |
+|------|------------|---------|
+| 核心验证 | 指令是否 trap / 不 trap | 数据是否被纠正、错误是否被检测 |
+| 触发方式 | 执行特权指令 | 读/写注入了错误的内存地址 |
+| 结果检查 | EC 值、target EL | CE/UE 状态位、syndrome、error address、读回数据 |
+| 异常类型 | 同步 trap（UNDEF） | Data Abort / SError / IRQ |
+| 状态管理 | `trap_record_reset()` | 清 ECC status、清 pending interrupt、清 syndrome |
+
+因此 ECC 扩展需要 **引入自己的测试基础设施**（错误注入 API、状态采集、ECC-specific 的 `ext_reset`），而非直接复用 `EXPECT_TRAP`。但框架的 `TEST_REGISTER/BEGIN/END`、`TEST_ASSERT_*`、异常向量表、构建系统等仍然完全复用。
+
+### 4.3 目录结构与脚手架
 
 ```bash
 mkdir -p ecc/tests
 ```
 
-### 第二步：创建 Makefile（3 行）
+```
+ecc/
+├── Makefile              # 构建配置
+├── kernel.ld             # 链接脚本（含 ECC 测试 buffer 段）
+├── main.c                # 入口
+├── ecc_inject.h          # 平台相关：错误注入 API（需按你的 SoC 实现）
+├── ecc_inject.c          # 平台相关：错误注入实现
+└── tests/
+    ├── test_register.c   # 聚合器
+    ├── test_ecc_ce.c     # 1bit CE 测试
+    └── test_ecc_ue.c     # 2bit UE 测试
+```
+
+**`ecc/Makefile`**：
 
 ```makefile
-# ecc/Makefile
 TARGET   = ecc_test.elf
-EXT_OBJS = main.o tests/test_register.o
+EXT_OBJS = main.o ecc_inject.o tests/test_register.o
 include ../common/Makefile.common
 ```
 
-### 第三步：创建 kernel.ld（2 行）
+**`ecc/kernel.ld`**（需要额外定义 ECC 测试 buffer，避免覆盖代码/栈）：
 
 ```ld
-/* ecc/kernel.ld */
 ENTRY(_entry)
 MEMORY { RAM (rwx) : ORIGIN = 0x40000000, LENGTH = 64M }
-SECTIONS { INCLUDE ../common/kernel_common.ld }
+SECTIONS {
+    INCLUDE ../common/kernel_common.ld
+
+    /* ECC 测试专用 buffer：64KB，独立于代码和栈 */
+    .ecc_test_buf (NOLOAD) : {
+        . = ALIGN(0x10000);
+        PROVIDE(__ecc_test_start = .);
+        . += 64K;
+        PROVIDE(__ecc_test_end = .);
+    } > RAM
+}
 ```
 
-### 第四步：创建 main.c（模板复制，改扩展名即可）
+**`ecc/main.c`**：
 
 ```c
-/* ecc/main.c */
 #include "test_framework.h"
 #include "uart.h"
+#include "ecc_inject.h"
 
-/* 扩展特有的状态重置（可选，弱符号默认为空操作） */
 extern void ext_reset(void);
 __attribute__((weak))
-void ext_reset(void) { }
+void ext_reset(void)
+{
+    /* 每条用例结束后由框架调用，清理 ECC 残留状态 */
+    ecc_clear_status();
+}
 
 int main(void)
 {
@@ -217,11 +273,12 @@ int main(void)
     printf("\n");
     printf("========================================\n");
     printf("  ARM Privilege Test Framework\n");
-    printf("  Extension: ecc (Error Correcting Code)\n");   // ← 改这里
+    printf("  Extension: ecc (Error Correcting Code)\n");
     printf("  Platform:  " PLATFORM_NAME "\n");
     printf("  Current EL: %d\n", get_current_el());
     printf("========================================\n\n");
 
+    ecc_inject_init();
     ext_reset();
     test_run_all();
     test_print_summary();
@@ -235,225 +292,216 @@ int main(void)
 }
 ```
 
-### 第五步：编写测试用例
+### 4.4 定义错误注入 API（平台相关）
 
-创建 `ecc/tests/test_ecc_regs.c`：
+这是 ECC 扩展的核心。**注入寄存器的地址和位域完全取决于你的 SoC**，下面是接口模板：
+
+**`ecc/ecc_inject.h`**：
+
+```c
+#ifndef _ECC_INJECT_H_
+#define _ECC_INJECT_H_
+
+#include "types.h"
+
+/* 注入类型 */
+#define ECC_INJECT_1BIT     0   /* 单 bit 错误 → CE */
+#define ECC_INJECT_2BIT     1   /* 双 bit 错误 → UE */
+
+/* 注入目标 */
+#define ECC_TARGET_DATA     0   /* 数据位 */
+#define ECC_TARGET_ECC      1   /* 校验位 */
+
+/* 错误状态采集结果 */
+typedef struct {
+    bool     ce_detected;       /* Correctable Error 标志 */
+    bool     ue_detected;       /* Uncorrectable Error 标志 */
+    uint64_t error_addr;        /* 硬件记录的错误地址 */
+    uint32_t syndrome;          /* 错误 syndrome */
+    uint32_t ce_count;          /* CE 累计计数 */
+    uint32_t ue_count;          /* UE 累计计数 */
+} ecc_status_t;
+
+/* ---- 平台实现（需按 SoC TRM 填写寄存器地址和位域）---- */
+void         ecc_inject_init(void);
+void         ecc_clear_status(void);
+void         ecc_inject_error(uintptr_t addr, int inject_type, int target_type);
+ecc_status_t ecc_read_status(void);
+
+/* ---- cache 辅助（测 DDR ECC 需要绕过 cache）---- */
+void         ecc_flush_addr(uintptr_t addr);
+void         ecc_invalidate_addr(uintptr_t addr);
+
+#endif
+```
+
+### 4.5 编写测试用例
+
+**`ecc/tests/test_ecc_ce.c`**（1bit CE 测试）：
 
 ```c
 #include "test_framework.h"
-#include "sysreg_ops.h"
+#include "ecc_inject.h"
 
-/*
- * ARM RAS 扩展中 ECC 相关系统寄存器：
- *   ERRIDR_EL1    — Error Record ID Register（只读，记录 error record 数量）
- *   ERRSELR_EL1   — Error Record Select Register（选择当前操作的 error record）
- *   ERXSTATUS_EL1 — Selected Error Record Status
- *   ERXADDR_EL1   — Selected Error Record Address
- *   ERXMISC0_EL1  — Selected Error Record Misc 0
- *   ERXCTLR_EL1   — Selected Error Record Control
+extern uintptr_t __ecc_test_start;
+
+/* ============================================================
+ * ECC_001: 单 bit 数据错误 → CE 自动纠正
  *
- * 这些寄存器均为 EL1 寄存器，EL0 访问应 trap。
- */
-
-/* ---- 如果 sysreg_ops.h 中没有这些寄存器，先定义 inline 访问函数 ---- */
-static inline uint64_t read_erridr_el1(void) {
-    uint64_t val;
-    asm volatile("mrs %0, ERRIDR_EL1" : "=r"(val));
-    return val;
-}
-static inline uint64_t read_errselr_el1(void) {
-    uint64_t val;
-    asm volatile("mrs %0, ERRSELR_EL1" : "=r"(val));
-    return val;
-}
-static inline void write_errselr_el1(uint64_t val) {
-    asm volatile("msr ERRSELR_EL1, %0" : : "r"(val));
-}
-static inline uint64_t read_erxstatus_el1(void) {
-    uint64_t val;
-    asm volatile("mrs %0, ERXSTATUS_EL1" : "=r"(val));
-    return val;
-}
-
-/* ============================================================
- * ECC-E1-01: EL1 可读 ERRIDR_EL1
+ * 流程：写已知数据 → flush cache → 注入 1bit → 读回 → 检查
+ * 预期：读值 == 写入值（已被硬件纠正），CE 状态被记录
  * ============================================================ */
-TEST_REGISTER(test_ecc_erridr_el1_read);
-bool test_ecc_erridr_el1_read(void)
+TEST_REGISTER(test_ecc_ce_data_correction);
+bool test_ecc_ce_data_correction(void)
 {
-    TEST_BEGIN("ECC-E1-01: MRS ERRIDR_EL1 @ EL1 → ok");
+    TEST_BEGIN("ECC_001: 1bit data CE → auto-corrected");
 
-    volatile uint64_t sink;
-    EXPECT_NO_TRAP(sink = read_erridr_el1());
-    (void)sink;
+    uintptr_t test_addr = (uintptr_t)&__ecc_test_start;
+    uint64_t pattern = 0xA5A5A5A55A5A5A5AULL;
+
+    /* 步骤 1：写入已知模式 */
+    *(volatile uint64_t *)test_addr = pattern;
+
+    /* 步骤 2：flush cache，确保数据落入 DDR/SRAM */
+    ecc_flush_addr(test_addr);
+
+    /* 步骤 3：注入 1bit 数据错误 */
+    ecc_inject_error(test_addr, ECC_INJECT_1BIT, ECC_TARGET_DATA);
+
+    /* 步骤 4：invalidate cache，确保下次读走 ECC 路径 */
+    ecc_invalidate_addr(test_addr);
+
+    /* 步骤 5：读回并检查 */
+    uint64_t readback = *(volatile uint64_t *)test_addr;
+    TEST_ASSERT_EQ("data auto-corrected", readback, pattern);
+
+    /* 步骤 6：检查 CE 状态 */
+    ecc_status_t status = ecc_read_status();
+    TEST_ASSERT("CE detected", status.ce_detected);
+    TEST_ASSERT("no UE", !status.ue_detected);
+    TEST_ASSERT_EQ("error addr matches", status.error_addr, test_addr);
 
     TEST_END();
 }
 
 /* ============================================================
- * ECC-E1-02: EL1 可读写 ERRSELR_EL1
+ * ECC_006: CE 地址记录正确
  * ============================================================ */
-TEST_REGISTER(test_ecc_errselr_el1_rw);
-bool test_ecc_errselr_el1_rw(void)
+TEST_REGISTER(test_ecc_ce_addr_capture);
+bool test_ecc_ce_addr_capture(void)
 {
-    TEST_BEGIN("ECC-E1-02: MRS/MSR ERRSELR_EL1 @ EL1 → ok");
+    TEST_BEGIN("ECC_006: CE error address = test address");
 
-    volatile uint64_t val;
-    EXPECT_NO_TRAP(val = read_errselr_el1());
-    EXPECT_NO_TRAP(write_errselr_el1(0));
-    (void)val;
+    uintptr_t test_addr = (uintptr_t)&__ecc_test_start + 0x100;
+    *(volatile uint64_t *)test_addr = 0x0123456789ABCDEFULL;
+    ecc_flush_addr(test_addr);
+    ecc_inject_error(test_addr, ECC_INJECT_1BIT, ECC_TARGET_DATA);
+    ecc_invalidate_addr(test_addr);
 
-    TEST_END();
-}
+    (void)*(volatile uint64_t *)test_addr;  /* 触发读 */
 
-/*
- * EL0 test helpers:
- * EL0 无法访问 UART，必须用 helper 函数 + EL_DO_TRAP 延迟记录 trap，
- * 回到 EL1 后用 CHECK_TRAP 验证。
- *
- * 注意 EC 值：EL0 访问 EL1 系统寄存器产生 EC_UNKNOWN（0x00，即 UNDEF），
- * 不是 EC_MSR_MRS_SYSTEM（0x18）。
- */
+    ecc_status_t status = ecc_read_status();
+    TEST_ASSERT("CE detected", status.ce_detected);
+    TEST_ASSERT_EQ("error addr", status.error_addr, test_addr);
 
-static volatile uint64_t ecc_sink;
-
-static void el0_read_erridr(uint64_t arg)
-{
-    (void)arg;
-    EL_DO_TRAP(ecc_sink = read_erridr_el1());
-}
-
-static void el0_read_errselr(uint64_t arg)
-{
-    (void)arg;
-    EL_DO_TRAP(ecc_sink = read_errselr_el1());
-}
-
-static void el0_read_erxstatus(uint64_t arg)
-{
-    (void)arg;
-    EL_DO_TRAP(ecc_sink = read_erxstatus_el1());
-}
-
-/* ============================================================
- * ECC-E0-01: EL0 读 ERRIDR_EL1 应 trap
- * ============================================================ */
-TEST_REGISTER(test_ecc_erridr_el0_trap);
-bool test_ecc_erridr_el0_trap(void)
-{
-    TEST_BEGIN("ECC-E0-01: MRS ERRIDR_EL1 @ EL0 → trap");
-    run_at_el(EL0, el0_read_erridr, 0);
-    CHECK_TRAP("ERRIDR_EL1 trapped from EL0", EC_UNKNOWN);
-    TEST_END();
-}
-
-/* ============================================================
- * ECC-E0-02: EL0 读 ERRSELR_EL1 应 trap
- * ============================================================ */
-TEST_REGISTER(test_ecc_errselr_el0_trap);
-bool test_ecc_errselr_el0_trap(void)
-{
-    TEST_BEGIN("ECC-E0-02: MRS ERRSELR_EL1 @ EL0 → trap");
-    run_at_el(EL0, el0_read_errselr, 0);
-    CHECK_TRAP("ERRSELR_EL1 trapped from EL0", EC_UNKNOWN);
-    TEST_END();
-}
-
-/* ============================================================
- * ECC-E0-03: EL0 读 ERXSTATUS_EL1 应 trap
- * ============================================================ */
-TEST_REGISTER(test_ecc_erxstatus_el0_trap);
-bool test_ecc_erxstatus_el0_trap(void)
-{
-    TEST_BEGIN("ECC-E0-03: MRS ERXSTATUS_EL1 @ EL0 → trap");
-    run_at_el(EL0, el0_read_erxstatus, 0);
-    CHECK_TRAP("ERXSTATUS_EL1 trapped from EL0", EC_UNKNOWN);
     TEST_END();
 }
 ```
 
-### 第六步：创建测试注册文件
+**`ecc/tests/test_ecc_ue.c`**（2bit UE 测试）：
 
 ```c
-/* ecc/tests/test_register.c */
-#include "test_ecc_regs.c"
+#include "test_framework.h"
+#include "ecc_inject.h"
+
+extern uintptr_t __ecc_test_start;
+
+/* ============================================================
+ * ECC_003: 双 bit 数据错误 → UE 检测
+ *
+ * 预期：触发 Data Abort 或 SError，UE 状态被记录
+ * 使用 EXPECT_TRAP 捕获同步异常（Data Abort EC=0x24/0x25）
+ * ============================================================ */
+TEST_REGISTER(test_ecc_ue_data_detect);
+bool test_ecc_ue_data_detect(void)
+{
+    TEST_BEGIN("ECC_003: 2bit data UE → abort + UE reported");
+
+    uintptr_t test_addr = (uintptr_t)&__ecc_test_start + 0x200;
+    *(volatile uint64_t *)test_addr = 0xFFFFFFFFFFFFFFFFULL;
+    ecc_flush_addr(test_addr);
+    ecc_inject_error(test_addr, ECC_INJECT_2BIT, ECC_TARGET_DATA);
+    ecc_invalidate_addr(test_addr);
+
+    /* 读访问应触发 Data Abort */
+    volatile uint64_t sink;
+    EXPECT_TRAP(EC_DATA_ABORT_SAME_EL,
+                sink = *(volatile uint64_t *)test_addr);
+    (void)sink;
+
+    /* 检查 UE 状态 */
+    ecc_status_t status = ecc_read_status();
+    TEST_ASSERT("UE detected", status.ue_detected);
+    TEST_ASSERT_EQ("error addr", status.error_addr, test_addr);
+
+    TEST_END();
+}
 ```
 
-### 第七步：注册到顶层 Makefile
+**`ecc/tests/test_register.c`**：
 
-编辑根目录 `Makefile`，在 `EXTENSIONS` 行添加 `ecc`：
+```c
+#include "test_ecc_ce.c"
+#include "test_ecc_ue.c"
+```
+
+### 4.6 注册到顶层 Makefile
 
 ```makefile
 EXTENSIONS = sysreg irq el2 el3 ecc
 ```
 
-### 第八步：编译运行
-
-```bash
-# 单独编译运行
-make ecc && make ecc-qemu
-
-# 或一键全部测试
-make test
-```
-
-### 需要修改 common 吗？
+### 4.7 需要修改 common 吗？
 
 | 你要做的事 | 是否需要改 common |
 |-----------|-----------------|
-| 访问已有的 EL1 系统寄存器 | ❌ 不需要，测试文件里直接 `asm volatile` |
-| 使用新的 EC 值 | 可能需要在 `encoding.h` 加 `#define` |
-| 需要 EL2/EL3 执行操作 | ❌ 不需要，直接用 `run_at_el()` |
-| 需要新的断言宏 | 极少，已有宏覆盖绝大多数场景 |
+| ECC 错误注入 / 状态采集 | ❌ 全部在 `ecc/ecc_inject.c` 中实现 |
+| 使用 `TEST_ASSERT_EQ` 等断言 | ❌ 直接复用 |
+| 捕获 Data Abort（UE 触发的） | 可能需要在 `encoding.h` 添加 `EC_DATA_ABORT_SAME_EL` |
+| cache flush/invalidate 操作 | 可以在 `sysreg_ops.h` 中添加 `dc civac`/`dc cvac` 封装 |
+| 链接脚本增加测试 buffer 段 | ❌ 在 `ecc/kernel.ld` 中定义，不改 `kernel_common.ld` |
 
-**大多数情况下添加测试用例不需要改 common 的任何文件。**
+### 4.8 ECC 测试的常见坑
+
+1. **数据没真正进入受 ECC 保护的存储体** — 写后必须 `dc cvac`（clean）flush 到内存
+2. **读时命中 cache，没走 ECC 路径** — 读前必须 `dc civac`（clean+invalidate）
+3. **异常处理没建好** — 2bit UE 触发 Data Abort/SError，框架的向量表已覆盖
+4. **状态寄存器没清零** — `ext_reset()` 中调用 `ecc_clear_status()`，每条用例自动清理
+5. **测试地址覆盖代码/栈** — 使用 linker 定义的 `__ecc_test_start` 专用 buffer
 
 ---
 
 ## 五、常见问题
 
-### Q1: 编译报错找不到寄存器名？
+### Q1: 测试执行挂死？
 
-部分 RAS/ECC 寄存器需要 `-march=armv8.2-a+ras` 编译选项。在你的 `ecc/Makefile` 中加：
+1. **ECC UE 没有被 trap handler 捕获** — 检查 `encoding.h` 中是否定义了 `EC_DATA_ABORT_SAME_EL`（0x25）和 `EC_SERROR`（0x2F）
+2. 检查是否有 WFI/WFE 且没有 pending 中断
+3. 检查 EL 切换后是否正确返回
+4. 用 `make disasm` 查看反汇编定位问题
 
-```makefile
-CFLAGS += -march=armv8.2-a+ras
-```
+### Q2: 平台不支持某个特性怎么办？
 
-或者使用 `S3_<op1>_C<CRn>_C<CRm>_<op2>` 编码形式直接访问。
-
-### Q2: QEMU 不支持我要测的特性怎么办？
-
-使用 `TEST_SKIP` 宏跳过不支持的测试。可以通过读取 ID 寄存器或尝试访问来检测特性支持：
+使用 `TEST_SKIP` 宏：
 
 ```c
-TEST_REGISTER(test_ecc_erxstatus);
-bool test_ecc_erxstatus(void)
-{
-    TEST_BEGIN("ECC-E1-03: MRS ERXSTATUS_EL1 @ EL1 → ok");
-
-    /* 先读 ERRIDR_EL1 检测是否有 error record */
-    uint64_t erridr = read_erridr_el1();
-    uint32_t num_records = (uint32_t)(erridr & 0xFFFF);
-    if (num_records == 0) {
-        TEST_SKIP("platform reports 0 error records");
-    }
-
-    volatile uint64_t sink;
-    EXPECT_NO_TRAP(sink = read_erxstatus_el1());
-    (void)sink;
-
-    TEST_END();
+TEST_BEGIN("ECC_027: Cache ECC 1bit CE");
+if (!platform_has_cache_ecc()) {
+    TEST_SKIP("platform does not support cache ECC injection");
 }
 ```
 
-### Q3: 测试执行挂死？
-
-1. 检查是否有 WFI/WFE 且没有 pending 中断
-2. 检查 EL 切换后是否正确返回
-3. 用 `make disasm` 查看反汇编定位问题
-
-### Q4: Docker 环境怎么跑？
+### Q3: Docker 环境怎么跑？
 
 ```bash
 docker build -t arm-priv-test -f common/Dockerfile .
@@ -461,18 +509,43 @@ docker run -d --name arm-build -v $(pwd):/workspace arm-priv-test tail -f /dev/n
 docker exec arm-build make ecc-qemu
 ```
 
+> **注意**：ECC 错误注入通常依赖真实硬件，QEMU 一般不支持。
+> QEMU 上可以验证编译通过和框架流程，功能验证需要在真实 SoC 上运行。
+
+### Q4: 如何适配到我自己的 SoC？
+
+你只需要实现 `ecc/ecc_inject.c` 中的 4 个函数：
+
+| 函数 | 说明 | 参考 |
+|------|------|------|
+| `ecc_inject_init()` | 初始化 ECC 控制器 | SoC TRM 中 ECC Controller 章节 |
+| `ecc_inject_error()` | 配置错误注入寄存器 | 注入控制寄存器地址/位域 |
+| `ecc_read_status()` | 读取 CE/UE/syndrome/addr | 状态寄存器地址/位域 |
+| `ecc_clear_status()` | 清除错误状态 | 写清状态寄存器 |
+
+框架的其他部分（构建系统、测试注册、断言宏、异常处理）全部复用，无需修改。
+
 ---
 
 ## 六、检查清单
 
-添加新扩展时的完整检查清单：
+### 添加普通特权指令测试扩展
 
 - [ ] 创建 `<ext>/Makefile`（TARGET + EXT_OBJS + include）
 - [ ] 创建 `<ext>/kernel.ld`（ENTRY + INCLUDE）
-- [ ] 创建 `<ext>/main.c`（复制模板，改扩展名）
+- [ ] 创建 `<ext>/main.c`（复制模板，改扩展名，声明 `ext_reset` 弱符号）
 - [ ] 创建 `<ext>/tests/test_register.c`（#include 所有测试文件）
 - [ ] 创建 `<ext>/tests/test_<feature>.c`（编写测试用例）
 - [ ] 顶层 `Makefile` 的 `EXTENSIONS` 中添加扩展名
 - [ ] `make <ext>` 编译通过
 - [ ] `make <ext>-qemu` 运行通过
-- [ ] 如有新系统寄存器编码，更新 `common/encoding.h`
+
+### 添加 ECC 测试扩展（额外检查）
+
+- [ ] 实现 `ecc_inject.h/c`（适配你的 SoC 错误注入寄存器）
+- [ ] `kernel.ld` 中定义 ECC 测试 buffer 段（避免覆盖代码/栈）
+- [ ] `ext_reset()` 中调用 `ecc_clear_status()`
+- [ ] 确认 `encoding.h` 中有 `EC_DATA_ABORT_SAME_EL`（0x25）定义
+- [ ] CE 测试：验证读值被纠正 + CE 状态 + 错误地址
+- [ ] UE 测试：验证 Data Abort/SError 触发 + UE 状态 + 错误地址
+- [ ] 在真实硬件上验证（QEMU 通常不支持 ECC 错误注入）
