@@ -2,17 +2,18 @@
  * ecc extension - Main Entry
  *
  * Tests ECC (Error Correcting Code) functionality:
- *   - 1bit correctable error (CE) detection and correction
- *   - 2bit uncorrectable error (UE) detection
- *
- * All tests use pure memory operations (write → flip bits → read → verify).
- * No dependency on ecc_inject simulation layer.
+ *   - Pure memory tests: direct bit-flip → read → verify (ECC_001/002/003)
+ *   - ecc_inject tests: software-simulated injection layer (INJ_CE/UE)
  */
 #include "test_framework.h"
 #include "uart.h"
+#include "ecc_inject.h"
 
 __attribute__((weak))
-void ext_reset(void) { }
+void ext_reset(void)
+{
+    ecc_clear_status();
+}
 
 int main(void)
 {
@@ -26,6 +27,7 @@ int main(void)
     printf("  Current EL: %d\n", get_current_el());
     printf("========================================\n\n");
 
+    ecc_inject_init();
     ext_reset();
     test_run_all();
     test_print_summary();
