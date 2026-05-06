@@ -10,7 +10,7 @@
 #   make test                # Build and run ALL tests on QEMU
 #   make clean               # Clean all
 
-EXTENSIONS = sysreg irq el2 el3
+EXTENSIONS = sysreg irq el2 el3 ecc
 QEMU_TIMEOUT ?= 10
 
 .PHONY: all clean test $(EXTENSIONS)
