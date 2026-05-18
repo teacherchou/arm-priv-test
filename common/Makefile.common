@@ -63,9 +63,17 @@ $(TARGET): $(ALL_OBJS) kernel.ld
 %.o: %.S
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
-# QEMU run target
+# Run on QEMU: timeout-bounded, exits 0 (pass), 1 (fail), 2 (timeout).
+# The C-side test_print_summary emits a "RESULT: PASS|FAIL" line
+# that run_qemu.sh greps; the top-level Makefile aggregates those lines.
+# For raw interactive QEMU (no timeout), invoke qemu-system-aarch64
+# directly with the .elf — see docs/onboarding.md.
+QEMU_TIMEOUT ?= 30
 qemu: $(TARGET)
-	$(QEMU) $(QEMU_OPTS) $(TARGET)
+	@bash $(COMMON_DIR)/scripts/run_qemu.sh \
+	    --timeout $(QEMU_TIMEOUT) \
+	    --label "$(notdir $(CURDIR))" \
+	    -- $(QEMU) $(QEMU_OPTS) $(TARGET)
 
 # Disassemble
 disasm: $(TARGET)

@@ -2,6 +2,8 @@
 
 一个用于验证 ARM AArch64 架构下特权指令和系统寄存器访问权限的裸机测试框架。直接运行在 QEMU 上，不依赖任何操作系统，目标是对 ARM 架构中 EL0–EL3 各异常级别的特权操作进行合规性测试。
 
+> **新人首读：** [`docs/onboarding.md`](docs/onboarding.md) — 5 分钟跑通 + 加用例 + 加扩展 + 调试 + CI 集成
+
 ---
 
 ### 设计理念
@@ -77,12 +79,14 @@ docker exec arm-build make test
 # 构建所有扩展
 make all
 
-# 运行单个测试套件
+# 跑单个扩展（30s 超时，自动退出，退出码 0/1/2）
 make sysreg-qemu
-make el2-qemu
 
-# 一键运行所有测试
+# 一键跑所有扩展并聚合（CI 友好）
 make test
+
+# 看所有可用 target
+make help
 ```
 
 #### 指定编译器
@@ -131,6 +135,8 @@ qemu-system-aarch64 \
   RESULT: PASS
 ========================================
 ```
+
+最后一行（`RESULT: PASS`）由 C 端 `test_print_summary` 直接打印，CI 与 `make test` 都用它来判定退出码。
 
 ---
 
@@ -294,6 +300,8 @@ make myext && make myext-qemu
 
 ### 延伸阅读
 
+- **[`docs/onboarding.md`](docs/onboarding.md) — 5 分钟上手 + 加用例 + 调试 + CI 集成（推荐新人首读）**
+- **[`docs/test-capability-expansion.md`](docs/test-capability-expansion.md) — 测试能力扩展路线图（A/B/C/D 四档兼容性测试 + 行业最佳实践对照 + 扩展路径）**
 - `common/README.md` — 共享基础设施文件说明和新增测试适配指引
 - `docs/arm-spec-test-base.md` — ARM 特权指令测试设计基础
 - `docs/arm-spec-irq-test.md` — 中断相关扩展测试设计

@@ -65,17 +65,20 @@ coverage report / uncovered item / ISA spec
 
 ### Step 5：运行覆盖验证并报告
 
+运行命令统一走顶层：`make <ext>-qemu`（单扩展）或 `make test`（全量），退出码 `0/1/2 = PASS/FAIL/超时`。每次运行 C 端都会打印 `RESULT: PASS|FAIL`——**用它做 baseline ↔ post-add 的对比基准**，不要再自己从测试 stdout 数 PASS。
+
 最终报告必须包含：
 
 - 使用的 coverage 输入
 - 目标 coverpoint / bin / cross
 - 新增或修改的测试文件
-- 执行的构建与运行命令
-- 覆盖变化
+- 执行的构建与运行命令（以 `make <ext>-qemu` / `make test` 为准）
+- 覆盖变化（VERDICT 行 baseline vs post 的差异；以及覆盖工具的 uncovered 列表差异）
 - 仍未覆盖的项目和原因
 - 需要用户协助确认的 spec、平台或工具问题
 
 ## 参考资料
 
+- `docs/onboarding.md`：上手 + 调试 + CI 集成（仓库内权威操作指南）
 - `references/coverpoint.md`：ISA coverpoint 设计与覆盖提升方法
 - `coverpoint_for_isa.md`：RISC-V ISA Coverpoint 原理、使用与提覆盖指南

@@ -24,8 +24,11 @@ void test_run_all(void)
     }
 }
 
-void test_print_summary(void)
+void test_print_summary(const char *label)
 {
+    bool failed = test_summary.failed > 0;
+    const char *tag = label ? label : "test";
+
     printf("\n========================================\n");
     printf("  Test Summary\n");
     printf("========================================\n");
@@ -34,11 +37,6 @@ void test_print_summary(void)
     printf("  Failed:  %d\n", test_summary.failed);
     printf("  Skipped: %d\n", test_summary.skipped);
     printf("========================================\n");
-
-    if (test_summary.failed > 0) {
-        printf("  RESULT: FAIL\n");
-    } else {
-        printf("  RESULT: PASS\n");
-    }
-    printf("========================================\n\n");
+    printf("  RESULT: %s\n", failed ? "FAIL" : "PASS");
+    printf("========================================\n");
 }

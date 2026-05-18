@@ -105,22 +105,40 @@ description: >
 
 实现后必须执行构建和运行验证，除非用户明确只要求测试计划。
 
-典型命令：
+典型命令（顶层 Makefile 已经收敛到一组）：
 
 ```bash
-make <ext>
-make -C <ext> qemu
+make <ext>          # 仅构建
+make <ext>-qemu     # 构建 + 跑（默认 30s 超时，自动退出，退出码 0/1/2）
+make test           # 跑全部扩展并聚合，CI 友好
 ```
 
-如果项目使用容器环境，按项目已有命令执行，不要在 skill 中写死私人路径。
+QEMU 进程不会自己结束，由 `common/scripts/run_qemu.sh` 包超时；C 端会在末尾打印人类可读的汇总：
+
+```
+========================================
+  Test Summary
+========================================
+  Total:   N
+  Passed:  N
+  Failed:  N
+  Skipped: N
+========================================
+  RESULT: PASS|FAIL
+========================================
+```
+
+退出码语义：`0=PASS`、`1=FAIL`、`2=超时/无 RESULT 行`。
+
+如果项目使用容器环境，按项目已有命令执行，不要在 skill 中写死私人路径。具体上手与调试见 `docs/onboarding.md`。
 
 验证结果必须记录：
 
 - 构建命令
 - 运行命令
-- PASS / FAIL / SKIP 数量
-- 失败日志摘要
-- 已确认的平台限制
+- 来自 `RESULT: PASS|FAIL` 行的最终结果
+- 失败日志摘要（含 `EC=`、`ELR=`、`target_el` 等 trap dump 字段）
+- 已确认的平台限制（QEMU 不支持的项以 `TEST_SKIP` 处理）
 
 ### Step 5：报告完成状态和协助项
 
@@ -157,15 +175,32 @@ bool test_fn(void) {
 }
 ```
 
+### 新建扩展时 main.c 入口约定
+
+`main()` 必须把扩展短名传给 `test_print_summary`，否则 `[<ext>]` 汇总行会退化为 `[test]`：
+
+```c
+test_run_all();
+test_print_summary("<ext>");   /* 短名，与目录名一致 */
+
+if (test_summary.failed > 0) PLATFORM_HALT_FAIL();
+else                          PLATFORM_HALT_PASS();
+```
+
+完整模板见 `docs/onboarding.md` §4。
+
 ## 关键 EC 值
+
+必须与 `common/encoding.h` 保持一致：
 
 | EC | 含义 | 典型场景 |
 |---|---|---|
-| `EC_UNKNOWN` | Unknown reason | EL0 访问 EL1 sysreg |
-| `EC_HVC` | HVC instruction | EL1 调用 HVC |
-| `EC_SMC` | SMC instruction | EL1 调用 SMC |
-| `EC_MSR_MRS_SYSTEM` | trapped MSR/MRS/system instruction | EL2 trap routing |
-| `EC_DATA_ABORT_SAME_EL` | Data Abort from same EL | 数据访问异常 |
+| `EC_UNKNOWN` (0x00) | Unknown reason | EL0 访问 EL1 sysreg（UNDEF） |
+| `EC_HVC_AARCH64` (0x16) | HVC from AArch64 | EL1 调用 HVC |
+| `EC_SMC_AARCH64` (0x17) | SMC from AArch64 | EL1 调用 SMC |
+| `EC_MSR_MRS_SYSTEM` (0x18) | trapped MSR/MRS/system instruction | EL2 trap routing |
+| `EC_DATA_ABORT_LOW` (0x24) | Data Abort from lower EL | 数据访问异常（lower EL） |
+| `EC_DATA_ABORT_SAME` (0x25) | Data Abort from same EL | 数据访问异常（same EL） |
 
 ## 禁止事项
 
@@ -178,6 +213,9 @@ bool test_fn(void) {
 
 ## 参考资料
 
+- `docs/onboarding.md`：上手指南、调试 cookbook、CI 集成、内部机制图解（仓库内权威）
+- `README.md`：顶层架构与 API 速查
+- `common/README.md`：common/ 各文件职责
 - `references/workflow.md`：测试计划与用例设计流程
 - `references/templates.md`：常用测试代码模板
 - `references/gotchas.md`：常见坑与处理方式

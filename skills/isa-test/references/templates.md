@@ -71,7 +71,7 @@ TEST_REGISTER(test_hvc_to_el2);
 bool test_hvc_to_el2(void) {
     TEST_BEGIN("EL1: HVC traps to EL2");
 
-    EXPECT_TRAP(EC_HVC, asm volatile("hvc #0"));
+    EXPECT_TRAP(EC_HVC_AARCH64, asm volatile("hvc #0"));
 
     TEST_END();
 }
@@ -82,7 +82,7 @@ TEST_REGISTER(test_smc_to_el3);
 bool test_smc_to_el3(void) {
     TEST_BEGIN("EL1: SMC traps to EL3");
 
-    EXPECT_TRAP(EC_SMC, asm volatile("smc #0"));
+    EXPECT_TRAP(EC_SMC_AARCH64, asm volatile("smc #0"));
 
     TEST_END();
 }

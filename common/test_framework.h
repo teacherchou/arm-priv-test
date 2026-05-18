@@ -224,6 +224,23 @@ extern test_summary_t test_summary;
 
 /* ---- Test runner & summary ---- */
 void test_run_all(void);
-void test_print_summary(void);
+
+/*
+ * Print the multi-line "Test Summary" block:
+ *   ========================================
+ *     Test Summary
+ *   ========================================
+ *     Total:   N
+ *     Passed:  N
+ *     Failed:  N
+ *     Skipped: N
+ *   ========================================
+ *     RESULT: PASS|FAIL
+ *   ========================================
+ *
+ * `label` is typically the extension's short name ("sysreg", "el2", ...).
+ * It is currently unused (reserved for future use); pass NULL.
+ */
+void test_print_summary(const char *label);
 
 #endif /* _TEST_FRAMEWORK_H_ */

@@ -1,54 +1,96 @@
 # ARM Privilege Test Framework - Top-level Makefile
 #
-# Usage:
-#   make all                 # Build all extensions
-#   make sysreg              # Build sysreg extension
-#   make irq                 # Build irq extension
-#   make el2                 # Build el2 extension
-#   make el3                 # Build el3 extension
-#   make sysreg-qemu         # Build and run sysreg on QEMU
-#   make test                # Build and run ALL tests on QEMU
-#   make clean               # Clean all
+# Common usage:
+#   make help               List all targets
+#   make all                Build all extensions
+#   make <ext>              Build one extension (e.g. make sysreg)
+#   make <ext>-qemu         Build & run one extension on QEMU; bounded by
+#                           QEMU_TIMEOUT, exits 0/1/2 (pass/fail/timeout)
+#   make test               Run every extension and aggregate the result
+#   make clean              Clean every extension
+#
+# For raw interactive QEMU (no timeout, Ctrl+A X to quit), run
+# qemu-system-aarch64 directly — see docs/onboarding.md §6.
 
-EXTENSIONS = sysreg irq el2 el3 ecc
-QEMU_TIMEOUT ?= 10
+EXTENSIONS    = sysreg irq el2 el3 ecc
+QEMU_TIMEOUT ?= 30
 
-.PHONY: all clean test $(EXTENSIONS)
+.PHONY: all help clean test $(EXTENSIONS) \
+        docker-build docker-run docker-test
 
 all: $(EXTENSIONS)
 
 $(EXTENSIONS):
 	$(MAKE) -C $@
 
-# QEMU run targets (single extension)
+# `make <ext>-qemu` runs that extension via run_qemu.sh
 %-qemu:
-	$(MAKE) -C $* qemu
+	$(MAKE) -C $* qemu QEMU_TIMEOUT=$(QEMU_TIMEOUT)
 
-# Run ALL tests sequentially with timeout
+# Run every extension, collect each's "RESULT: PASS|FAIL" line,
+# aggregate, propagate exit code.
 test: all
-	@pass=0; fail=0; skip=0; total=0; \
+	@total_pass=0; total_fail=0; total_skip=0; failed_exts=""; \
 	for ext in $(EXTENSIONS); do \
-		echo ""; \
-		echo "=== Running $ext tests ==="; \
-		$(MAKE) -C $ext qemu 2>&1 & pid=$!; \
-		sleep $(QEMU_TIMEOUT) && kill $pid 2>/dev/null & watcher=$!; \
-		wait $pid 2>/dev/null; \
-		kill $watcher 2>/dev/null; wait $watcher 2>/dev/null; \
+	  echo ""; echo "=== [$$ext] running ==="; \
+	  log=$$(mktemp); \
+	  $(MAKE) -s -C $$ext qemu QEMU_TIMEOUT=$(QEMU_TIMEOUT) 2>&1 | tee $$log; \
+	  rc=$${PIPESTATUS[0]}; \
+	  if [ "$$rc" -ne 0 ]; then failed_exts="$$failed_exts $$ext"; fi; \
+	  line=$$(grep -E "^\[$$ext\] " $$log | tail -n1); \
+	  p=$$(echo "$$line" | sed -nE 's/.*PASS=([0-9]+).*/\1/p'); \
+	  f=$$(echo "$$line" | sed -nE 's/.*FAIL=([0-9]+).*/\1/p'); \
+	  s=$$(echo "$$line" | sed -nE 's/.*SKIP=([0-9]+).*/\1/p'); \
+	  total_pass=$$((total_pass + $${p:-0})); \
+	  total_fail=$$((total_fail + $${f:-0})); \
+	  total_skip=$$((total_skip + $${s:-0})); \
+	  rm -f $$log; \
 	done; \
-	echo ""; echo "=== All test suites complete ==="
+	echo ""; \
+	echo "================================================================"; \
+	echo "  TOTAL  PASS=$$total_pass  FAIL=$$total_fail  SKIP=$$total_skip"; \
+	if [ -n "$$failed_exts" ]; then \
+	  echo "  FAILED EXTENSIONS:$$failed_exts"; \
+	  echo "================================================================"; \
+	  exit 1; \
+	fi; \
+	echo "  RESULT: PASS"; \
+	echo "================================================================"
 
-# Docker build & run
 docker-build:
 	docker build -t arm-priv-test -f common/Dockerfile .
 
 docker-run: docker-build
-	docker run -d --name arm-build -v $(pwd):/workspace arm-priv-test tail -f /dev/null
+	docker run -d --name arm-build -v $$(pwd):/workspace arm-priv-test tail -f /dev/null
 
 docker-test:
 	docker exec arm-build make test
 
-# Clean all
 clean:
 	@for ext in $(EXTENSIONS); do \
-		$(MAKE) -C $ext clean; \
+	  $(MAKE) -s -C $$ext clean; \
 	done
+
+help:
+	@echo "ARM Privilege Test Framework — top-level targets"
+	@echo ""
+	@echo "  make all              Build every extension"
+	@echo "  make <ext>            Build one extension ($(EXTENSIONS))"
+	@echo "  make <ext>-qemu       Build & run one extension on QEMU"
+	@echo "                        (timeout-bounded, exit 0/1/2)"
+	@echo "  make test             Run every extension, aggregate result,"
+	@echo "                        exit non-zero on any failure"
+	@echo "  make clean            Clean every extension"
+	@echo ""
+	@echo "  make docker-build     Build the container image"
+	@echo "  make docker-run       Start a long-lived build container"
+	@echo "  make docker-test      Run \`make test\` inside the container"
+	@echo ""
+	@echo "Variables:"
+	@echo "  QEMU_TIMEOUT=$(QEMU_TIMEOUT)   per-extension timeout in seconds"
+	@echo "  CROSS_COMPILER=...   override toolchain prefix"
+	@echo ""
+	@echo "Raw interactive QEMU: run qemu-system-aarch64 directly with"
+	@echo "the .elf — see docs/onboarding.md §6."
+	@echo ""
+	@echo "First-time onboarding: docs/onboarding.md"
