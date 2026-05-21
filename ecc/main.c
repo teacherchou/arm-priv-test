@@ -30,7 +30,7 @@ int main(void)
     ecc_inject_init();
     ext_reset();
     test_run_all();
-    test_print_summary();
+    test_print_summary("ecc");
 
     if (test_summary.failed > 0)
         PLATFORM_HALT_FAIL();

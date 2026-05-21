@@ -1,0 +1,11 @@
+[
+  {
+    "module": "sysreg",
+    "source": "/Users/shurui/ai/priv/arm-priv-test/NORM/SYSREG.yaml",
+    "generated_svh": "/Users/shurui/ai/priv/arm-priv-test/COVERPOINT/generated/SYSREG_coverage.svh",
+    "rules": 3,
+    "coverpoints": 7,
+    "bins": 21,
+    "testcases": 21
+  }
+]

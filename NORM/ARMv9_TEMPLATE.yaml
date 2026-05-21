@@ -1,0 +1,68 @@
+# ARMv9 normative rule to coverpoint mapping template
+# Purpose: map ARM architecture specification requirements to measurable coverpoints and concrete tests.
+
+metadata:
+  architecture: ARMv9-A
+  schema_version: 0.1
+  flow: SPEC -> Normative Rule -> CoverPoint -> Test Case -> Coverage Closure
+  owner: arm-priv-test
+  status: template
+
+module:
+  name: <module-name>
+  description: <module verification scope>
+  spec_sources:
+    - id: ARM_ARM
+      title: Arm Architecture Reference Manual for A-profile architecture
+      section: <chapter-or-section>
+      note: Replace with the exact spec version and section used by this module.
+
+coverage_dimensions:
+  exception_level: [EL0, EL1, EL2, EL3]
+  security_state: [Secure, NonSecure]
+  virtualization_state: [EL2Disabled, EL2Enabled, TrapRoutingEnabled]
+  access_type: [Read, Write, Execute, SystemInstruction]
+  result_type: [NoTrap, Trap, Abort, Interrupt, StateUpdate]
+  checkpoints: [EC, ISS, ELR, SPSR, FAR, RegisterValue, MemoryValue, TargetEL]
+
+normative_rule_definitions:
+  - id: <MODULE>-RULE-001
+    name: <short_rule_name>
+    spec:
+      source: ARM_ARM
+      section: <chapter-or-section>
+      quote_or_summary: <normative behavior extracted from spec>
+    rule: <one verifiable architecture requirement>
+    applies_when:
+      exception_level: <EL0|EL1|EL2|EL3|Any>
+      security_state: <Secure|NonSecure|Any>
+      feature_condition: <required feature or control-bit condition>
+    expected_behavior:
+      result: <NoTrap|Trap|Abort|Interrupt|StateUpdate>
+      target_el: <EL1|EL2|EL3|None>
+      ec: <expected exception class or None>
+      iss: <expected ISS field or None>
+      side_effect: <register or architectural state update>
+    coverpoints:
+      - name: cp_<module>_<behavior>
+        description: <what this coverpoint proves>
+        bins:
+          - name: <bin_name>
+            condition: <observable condition>
+      - name: cross_<module>_<combination>
+        description: <cross coverage goal>
+        crosses: [<dimension_a>, <dimension_b>, <dimension_c>]
+    testcases:
+      - id: <MODULE>-001
+        file: <module>/tests/<test_file>.c
+        function: <test_function>
+        stimulus: <operation executed by the test>
+        checks: [<checkpoint_a>, <checkpoint_b>]
+        expected_result: <PASS|SKIP under platform limitation>
+    platform:
+      qemu: <Supported|Unsupported|Partial|Unknown>
+      rtl: <Supported|Unsupported|Partial|Unknown>
+      fpga: <Supported|Unsupported|Partial|Unknown>
+      hardware: <Supported|Unsupported|Partial|Unknown>
+      skip_condition: <when TEST_SKIP should be used>
+    status: planned

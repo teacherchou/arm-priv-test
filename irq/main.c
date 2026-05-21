@@ -28,7 +28,7 @@ int main(void)
 
     ext_reset();
     test_run_all();
-    test_print_summary();
+    test_print_summary("irq");
 
     if (test_summary.failed > 0)
         PLATFORM_HALT_FAIL();

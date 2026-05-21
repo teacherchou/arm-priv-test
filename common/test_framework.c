@@ -30,13 +30,13 @@ void test_print_summary(const char *label)
     const char *tag = label ? label : "test";
 
     printf("\n========================================\n");
-    printf("  Test Summary\n");
+    printf("  Test Summary [%s]\n", tag);
     printf("========================================\n");
     printf("  Total:   %d\n", test_summary.total);
     printf("  Passed:  %d\n", test_summary.passed);
     printf("  Failed:  %d\n", test_summary.failed);
     printf("  Skipped: %d\n", test_summary.skipped);
     printf("========================================\n");
-    printf("  RESULT: %s\n", failed ? "FAIL" : "PASS");
+    printf("  [%s] RESULT: %s\n", tag, failed ? "FAIL" : "PASS");
     printf("========================================\n");
 }

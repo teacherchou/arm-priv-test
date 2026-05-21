@@ -2,14 +2,14 @@
 # run_qemu.sh — CI-friendly QEMU runner for arm-priv-test
 #
 # C-side test_print_summary() (common/test_framework.c) emits a
-# "RESULT: PASS|FAIL" line at the end of every run.
+# "[label] RESULT: PASS|FAIL" line at the end of every run.
 #
 # This wrapper just bounds the run with a timeout, tees output, looks at
 # that final line, and translates it into an exit code:
 #   0 = PASS, 1 = FAIL, 2 = TIMEOUT or RESULT line missing.
 #
 # When the run times out before the C summary prints, we synthesize a
-# fallback "RESULT: TIMEOUT" line so the top-level Makefile
+# fallback "[label] RESULT: TIMEOUT" line so the top-level Makefile
 # aggregator still has something to parse.
 #
 # Usage:
@@ -61,7 +61,7 @@ set +e
 run_with_timeout "$@" 2>&1 | tee "$log"
 set -e
 
-# Look for the C-printed summary line: "RESULT: PASS|FAIL"
+# Look for the C-printed summary line: "[label] RESULT: PASS|FAIL"
 verdict=$(grep -oE 'RESULT: (PASS|FAIL)' "$log" | tail -n1 | awk '{print $2}' || true)
 
 case "${verdict}" in
@@ -70,7 +70,7 @@ case "${verdict}" in
     *)
         # Synthesize a fallback line so the top-level aggregator can still
         # see this extension contributed to the result.
-        printf '\nRESULT: TIMEOUT\n'
+        printf '\n[%s] RESULT: TIMEOUT\n' "${label}"
         exit 2
         ;;
 esac

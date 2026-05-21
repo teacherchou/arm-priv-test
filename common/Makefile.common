@@ -64,7 +64,7 @@ $(TARGET): $(ALL_OBJS) kernel.ld
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
 # Run on QEMU: timeout-bounded, exits 0 (pass), 1 (fail), 2 (timeout).
-# The C-side test_print_summary emits a "RESULT: PASS|FAIL" line
+# The C-side test_print_summary emits a "[label] RESULT: PASS|FAIL" line
 # that run_qemu.sh greps; the top-level Makefile aggregates those lines.
 # For raw interactive QEMU (no timeout), invoke qemu-system-aarch64
 # directly with the .elf — see docs/onboarding.md.

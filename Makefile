@@ -15,7 +15,7 @@
 EXTENSIONS    = sysreg irq el2 el3 ecc
 QEMU_TIMEOUT ?= 30
 
-.PHONY: all help clean test $(EXTENSIONS) \
+.PHONY: all help clean test norm-check coverpoint-generate coverpoint-flow $(EXTENSIONS) \
         docker-build docker-run docker-test
 
 all: $(EXTENSIONS)
@@ -27,20 +27,20 @@ $(EXTENSIONS):
 %-qemu:
 	$(MAKE) -C $* qemu QEMU_TIMEOUT=$(QEMU_TIMEOUT)
 
-# Run every extension, collect each's "RESULT: PASS|FAIL" line,
+# Run every extension, collect each's "[ext] RESULT: PASS|FAIL" line,
 # aggregate, propagate exit code.
 test: all
 	@total_pass=0; total_fail=0; total_skip=0; failed_exts=""; \
 	for ext in $(EXTENSIONS); do \
 	  echo ""; echo "=== [$$ext] running ==="; \
 	  log=$$(mktemp); \
-	  $(MAKE) -s -C $$ext qemu QEMU_TIMEOUT=$(QEMU_TIMEOUT) 2>&1 | tee $$log; \
-	  rc=$${PIPESTATUS[0]}; \
+	  $(MAKE) -s -C $$ext qemu QEMU_TIMEOUT=$(QEMU_TIMEOUT) > $$log 2>&1; \
+	  rc=$$?; \
+	  cat $$log; \
 	  if [ "$$rc" -ne 0 ]; then failed_exts="$$failed_exts $$ext"; fi; \
-	  line=$$(grep -E "^\[$$ext\] " $$log | tail -n1); \
-	  p=$$(echo "$$line" | sed -nE 's/.*PASS=([0-9]+).*/\1/p'); \
-	  f=$$(echo "$$line" | sed -nE 's/.*FAIL=([0-9]+).*/\1/p'); \
-	  s=$$(echo "$$line" | sed -nE 's/.*SKIP=([0-9]+).*/\1/p'); \
+	  p=$$(grep -E "^[[:space:]]*Passed:" $$log | tail -n1 | awk '{print $$2}' | tr -d '\r'); \
+	  f=$$(grep -E "^[[:space:]]*Failed:" $$log | tail -n1 | awk '{print $$2}' | tr -d '\r'); \
+	  s=$$(grep -E "^[[:space:]]*Skipped:" $$log | tail -n1 | awk '{print $$2}' | tr -d '\r'); \
 	  total_pass=$$((total_pass + $${p:-0})); \
 	  total_fail=$$((total_fail + $${f:-0})); \
 	  total_skip=$$((total_skip + $${s:-0})); \
@@ -54,8 +54,17 @@ test: all
 	  echo "================================================================"; \
 	  exit 1; \
 	fi; \
-	echo "  RESULT: PASS"; \
+	echo "  [total] RESULT: PASS"; \
 	echo "================================================================"
+
+norm-check:
+	python3 common/scripts/coverpoint_flow.py check
+
+coverpoint-generate:
+	python3 common/scripts/coverpoint_flow.py generate
+
+coverpoint-flow:
+	python3 common/scripts/coverpoint_flow.py flow
 
 docker-build:
 	docker build -t arm-priv-test -f common/Dockerfile .
@@ -81,6 +90,9 @@ help:
 	@echo "  make test             Run every extension, aggregate result,"
 	@echo "                        exit non-zero on any failure"
 	@echo "  make clean            Clean every extension"
+	@echo "  make norm-check       Validate NORM rule/coverpoint/testcase links"
+	@echo "  make coverpoint-generate  Generate SVH skeleton and traceability reports"
+	@echo "  make coverpoint-flow  Run full offline CoverPoint check + generation"
 	@echo ""
 	@echo "  make docker-build     Build the container image"
 	@echo "  make docker-run       Start a long-lived build container"

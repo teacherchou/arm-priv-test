@@ -1,0 +1,289 @@
+# ARMv9 sysreg normative rule to coverpoint mappings
+# This file is the first ARMv9 pilot for SPEC -> Rule -> CoverPoint -> Test Case.
+
+metadata:
+  architecture: ARMv9-A
+  schema_version: 0.1
+  module: sysreg
+  flow: SPEC -> Normative Rule -> CoverPoint -> Test Case -> Coverage Closure
+  status: pilot
+
+module:
+  name: sysreg
+  description: System register access permission, trap behavior, and architectural state checks across exception levels.
+  spec_sources:
+    - id: ARM_ARM_SYSREG
+      title: Arm Architecture Reference Manual for A-profile architecture, system registers and system instructions
+      section: System register access, exception generation, ESR_ELx exception class encoding
+      note: Replace with the exact Arm ARM version and section numbers used by the project.
+
+coverage_dimensions:
+  exception_level: [EL0, EL1]
+  access_type: [Read, Write, SystemInstruction]
+  register_group: [EL1SystemRegister, EL0AccessibleRegister, MaintenanceInstruction, ExceptionReturn]
+  result_type: [NoTrap, Trap]
+  checkpoints: [EC, TargetEL, TrapTriggered, RegisterValue]
+
+normative_rule_definitions:
+  - id: SYSREG-RULE-001
+    name: el0_el1_sysreg_access_traps
+    spec:
+      source: ARM_ARM_SYSREG
+      section: System register access from lower Exception level
+      quote_or_summary: EL0 execution of system register accesses or system instructions that are not accessible at EL0 must generate an exception.
+    rule: EL0 access to EL1 system registers or EL1 maintenance instructions must trap instead of completing architecturally.
+    applies_when:
+      exception_level: EL0
+      security_state: Any
+      feature_condition: AArch64 execution state; target register or instruction is EL1 privileged.
+    expected_behavior:
+      result: Trap
+      target_el: EL1
+      ec: EC_UNKNOWN
+      iss: implementation-defined-or-not-checked
+      side_effect: Faulting operation must not complete as a normal EL0 operation.
+    coverpoints:
+      - name: cp_sysreg_el0_el1_read_trap
+        description: EL0 read attempts to EL1 system registers trap.
+        bins:
+          - name: sctlr_el1_read
+            condition: MRS SCTLR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: vbar_el1_read
+            condition: MRS VBAR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: ttbr0_el1_read
+            condition: MRS TTBR0_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: tcr_el1_read
+            condition: MRS TCR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: esr_el1_read
+            condition: MRS ESR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: far_el1_read
+            condition: MRS FAR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: mair_el1_read
+            condition: MRS MAIR_EL1 executed at EL0 traps with EC_UNKNOWN.
+      - name: cp_sysreg_el0_el1_write_trap
+        description: EL0 write attempts to EL1 system registers trap.
+        bins:
+          - name: sctlr_el1_write
+            condition: MSR SCTLR_EL1 executed at EL0 traps with EC_UNKNOWN.
+          - name: vbar_el1_write
+            condition: MSR VBAR_EL1 executed at EL0 traps with EC_UNKNOWN.
+      - name: cp_sysreg_el0_maintenance_trap
+        description: EL0 execution of EL1 maintenance instructions traps.
+        bins:
+          - name: tlbi_vmalle1
+            condition: TLBI VMALLE1 executed at EL0 traps with EC_UNKNOWN.
+          - name: ic_iallu
+            condition: IC IALLU executed at EL0 traps with EC_UNKNOWN.
+    testcases:
+      - id: SYSREG-01
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_sctlr_el1_at_el0
+        stimulus: MRS SCTLR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-02
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_write_sctlr_el1_at_el0
+        stimulus: MSR SCTLR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-03
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_vbar_el1_at_el0
+        stimulus: MRS VBAR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-04
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_write_vbar_el1_at_el0
+        stimulus: MSR VBAR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-05
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_ttbr0_el1_at_el0
+        stimulus: MRS TTBR0_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-06
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_tcr_el1_at_el0
+        stimulus: MRS TCR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-07
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_esr_el1_at_el0
+        stimulus: MRS ESR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-08
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_far_el1_at_el0
+        stimulus: MRS FAR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-09
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_read_mair_el1_at_el0
+        stimulus: MRS MAIR_EL1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-10
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_tlbi_vmalle1_at_el0
+        stimulus: TLBI VMALLE1 at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+      - id: SYSREG-11
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_ic_iallu_at_el0
+        stimulus: IC IALLU at EL0
+        checks: [TrapTriggered, EC_UNKNOWN]
+    platform:
+      qemu: Supported
+      rtl: Unknown
+      fpga: Unknown
+      hardware: Unknown
+      skip_condition: None expected for base EL0 privileged sysreg trap checks.
+    status: implemented
+
+  - id: SYSREG-RULE-002
+    name: el0_eret_traps
+    spec:
+      source: ARM_ARM_SYSREG
+      section: Exception return instruction access rules
+      quote_or_summary: ERET is an exception return instruction and is not valid for normal EL0 execution.
+    rule: ERET executed at EL0 must trap or be reported as illegal execution according to the architecture/platform exception classification.
+    applies_when:
+      exception_level: EL0
+      security_state: Any
+      feature_condition: AArch64 execution state.
+    expected_behavior:
+      result: Trap
+      target_el: EL1
+      ec: EC_UNKNOWN-or-EC_ILLEGAL_EXEC
+      iss: not-checked
+      side_effect: ERET must not complete as a valid EL0 control-flow operation.
+    coverpoints:
+      - name: cp_sysreg_el0_eret_trap
+        description: EL0 execution of ERET traps.
+        bins:
+          - name: eret_el0_trap
+            condition: ERET executed at EL0 triggers an exception.
+    testcases:
+      - id: SYSREG-12
+        file: sysreg/tests/test_sysreg_el0.c
+        function: test_sysreg_eret_at_el0
+        stimulus: ERET at EL0
+        checks: [TrapTriggered]
+    platform:
+      qemu: Supported
+      rtl: Unknown
+      fpga: Unknown
+      hardware: Unknown
+      skip_condition: None expected for base ERET-at-EL0 trap check.
+    status: implemented
+
+  - id: SYSREG-RULE-003
+    name: el1_el1_sysreg_access_succeeds
+    spec:
+      source: ARM_ARM_SYSREG
+      section: EL1 system register access rules
+      quote_or_summary: EL1 has architectural access to its own EL1 system registers and selected system instructions when no higher-level trap control redirects them.
+    rule: EL1 access to architecturally accessible EL1 system registers and selected maintenance instructions must complete without trap when no EL2 or EL3 trap routing is enabled.
+    applies_when:
+      exception_level: EL1
+      security_state: NonSecure
+      feature_condition: No higher-level trap routing configured for the tested operation.
+    expected_behavior:
+      result: NoTrap
+      target_el: None
+      ec: None
+      iss: None
+      side_effect: Register read/write or maintenance instruction completes normally.
+    coverpoints:
+      - name: cp_sysreg_el1_read_no_trap
+        description: EL1 reads from accessible system registers complete without trap.
+        bins:
+          - name: sctlr_el1_read
+            condition: MRS SCTLR_EL1 at EL1 completes without trap.
+          - name: ttbr0_el1_read
+            condition: MRS TTBR0_EL1 at EL1 completes without trap.
+          - name: tcr_el1_read
+            condition: MRS TCR_EL1 at EL1 completes without trap.
+          - name: mair_el1_read
+            condition: MRS MAIR_EL1 at EL1 completes without trap.
+          - name: daif_read
+            condition: MRS DAIF at EL1 completes without trap.
+      - name: cp_sysreg_el1_rw_no_trap
+        description: EL1 read/write access to writable registers completes and preserves expected value.
+        bins:
+          - name: vbar_el1_roundtrip
+            condition: MRS/MSR VBAR_EL1 at EL1 completes and readback matches expected value.
+          - name: tpidr_el0_roundtrip
+            condition: MRS/MSR TPIDR_EL0 at EL1 completes and readback matches expected value.
+      - name: cp_sysreg_el1_maintenance_no_trap
+        description: EL1 maintenance instructions complete without trap.
+        bins:
+          - name: tlbi_vmalle1
+            condition: TLBI VMALLE1 at EL1 completes without trap.
+          - name: ic_iallu
+            condition: IC IALLU at EL1 completes without trap.
+    testcases:
+      - id: SYSREG-E1-01
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_read_sctlr_el1_at_el1
+        stimulus: MRS SCTLR_EL1 at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-02
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_rw_vbar_el1_at_el1
+        stimulus: MRS/MSR VBAR_EL1 at EL1
+        checks: [NoTrap, RegisterValue]
+      - id: SYSREG-E1-03
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_read_ttbr0_el1_at_el1
+        stimulus: MRS TTBR0_EL1 at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-04
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_read_tcr_el1_at_el1
+        stimulus: MRS TCR_EL1 at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-05
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_read_mair_el1_at_el1
+        stimulus: MRS MAIR_EL1 at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-06
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_tlbi_vmalle1_at_el1
+        stimulus: TLBI VMALLE1 at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-07
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_ic_iallu_at_el1
+        stimulus: IC IALLU at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-08
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_read_daif_at_el1
+        stimulus: MRS DAIF at EL1
+        checks: [NoTrap]
+      - id: SYSREG-E1-09
+        file: sysreg/tests/test_sysreg_el1.c
+        function: test_sysreg_rw_tpidr_el0_at_el1
+        stimulus: MRS/MSR TPIDR_EL0 at EL1
+        checks: [NoTrap, RegisterValue]
+    platform:
+      qemu: Supported
+      rtl: Unknown
+      fpga: Unknown
+      hardware: Unknown
+      skip_condition: Skip only if target platform does not expose the required EL1 execution environment.
+    status: implemented
+
+coverage_closure:
+  implemented_test_count: 21
+  covered_rules: [SYSREG-RULE-001, SYSREG-RULE-002, SYSREG-RULE-003]
+  known_gaps:
+    - id: SYSREG-GAP-001
+      description: EL1 to EL2 system register access trap coverage is not represented in this sysreg pilot file yet; existing coverage may live under el2 tests.
+      suggested_next_step: Add SYSREG-RULE-004 or link to EL2 rule file for HCR_EL2 trap routing.
+    - id: SYSREG-GAP-002
+      description: RAZ/WI, RO, WO, reserved-bit behavior is not covered by current sysreg pilot rules.
+      suggested_next_step: Add register-specific rules once exact Arm ARM sections and writable masks are confirmed.
+    - id: SYSREG-GAP-003
+      description: Secure vs Non-secure sysreg access behavior is not covered by current sysreg pilot rules.
+      suggested_next_step: Extend with EL3/SCR_EL3-controlled security-state tests.

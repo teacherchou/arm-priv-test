@@ -235,11 +235,10 @@ void test_run_all(void);
  *     Failed:  N
  *     Skipped: N
  *   ========================================
- *     RESULT: PASS|FAIL
+ *     [label] RESULT: PASS|FAIL
  *   ========================================
  *
  * `label` is typically the extension's short name ("sysreg", "el2", ...).
- * It is currently unused (reserved for future use); pass NULL.
  */
 void test_print_summary(const char *label);
 
